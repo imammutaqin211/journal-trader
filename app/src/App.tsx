@@ -1565,7 +1565,7 @@ function App() {
     <div className={`dashboard-shell ${sidebarCollapsed ? 'sidebar-collapsed' : ''} ${darkTheme ? '' : 'light-mode'}`}>
       <aside className="sidebar">
         <div className="brand-row">
-          <div className="logo-mark"><img src="/trading-journal-logo.svg" alt="" /></div>
+          <div className="logo-mark"><img src={`${import.meta.env.BASE_URL}trading-journal-logo.svg`} alt="" /></div>
           <div className="brand-copy">
             <strong>Traders Journal</strong>
           </div>
