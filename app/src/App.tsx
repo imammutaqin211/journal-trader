@@ -577,7 +577,8 @@ function TradeLoggingView({ screenshots, existingScreenshots, setScreenshots, sc
   const [fieldSearch, setFieldSearch] = useState('')
   const [fieldsOpen, setFieldsOpen] = useState(false)
   const [symbol, setSymbol] = useState(editingTrade?.symbol ?? '')
-  const [attachedScreenshotIds, setAttachedScreenshotIds] = useState<string[]>(() => editingTrade?.screenshotIds?.slice(0, 1) ?? [])
+  const [attachedScreenshotIds, setAttachedScreenshotIds] = useState<string[]>(() => (editingTrade?.screenshotIds ?? []).filter((id) => screenshots.some((screenshot) => screenshot.id === id)).slice(0, 1))
+  const [screenshotSelectionChanged, setScreenshotSelectionChanged] = useState(false)
   const [entryPrice, setEntryPrice] = useState(String(editingTrade?.entryPrice ?? ''))
   const [exitPrice, setExitPrice] = useState(String(editingTrade?.exitPrice ?? ''))
   const [shares, setShares] = useState(String(editingTrade?.shares ?? '1'))
@@ -653,6 +654,7 @@ function TradeLoggingView({ screenshots, existingScreenshots, setScreenshots, sc
     if (!uploads.length) return
     const uploadIds = uploads.map(() => `screenshot-${globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`}`)
     setAttachedScreenshotIds((previous) => [...previous, ...uploadIds])
+    setScreenshotSelectionChanged(true)
     setScreenshotUploadPending(true)
     setScreenshotUploadError('')
     uploads.forEach((file, index) => {
@@ -719,6 +721,11 @@ function TradeLoggingView({ screenshots, existingScreenshots, setScreenshots, sc
             saveLock.current = false
             return
           }
+          if (screenshotUploadError) {
+            setFormError(screenshotUploadError)
+            saveLock.current = false
+            return
+          }
 
           const formData = new FormData(event.currentTarget)
           const symbolValue = String(formData.get('symbol') ?? '').trim()
@@ -770,7 +777,7 @@ function TradeLoggingView({ screenshots, existingScreenshots, setScreenshots, sc
             entryPrice: entryValue,
             exitPrice: exitValue,
             shares: shareValue,
-            screenshotIds: attachedScreenshotIds.slice(0, 1),
+            screenshotIds: screenshotSelectionChanged ? attachedScreenshotIds.slice(0, 1) : editingTrade?.screenshotIds?.slice(0, 1) ?? attachedScreenshotIds.slice(0, 1),
             symbolMetadata: symbolMetadata ?? undefined,
             actualPnl: actualPnlInput === '' ? undefined : Number(actualPnlInput),
             multiplier: multiplierValue,
@@ -819,6 +826,7 @@ function TradeLoggingView({ screenshots, existingScreenshots, setScreenshots, sc
           setNotes('')
           setCustomFieldValues({})
           setAttachedScreenshotIds([])
+          setScreenshotSelectionChanged(false)
           setTradeAccount(account === 'All Accounts' ? accounts[0] ?? '' : account)
           onTradeLogged()
           event.currentTarget.reset()
@@ -865,8 +873,8 @@ function TradeLoggingView({ screenshots, existingScreenshots, setScreenshots, sc
             <div className="notes-editor">
               <div className="notes-toolbar"><button type="button" aria-label="Bold" title="Bold" onClick={() => formatNotes('bold')}><b>B</b></button><button type="button" aria-label="Italic" title="Italic" onClick={() => formatNotes('italic')}><i>I</i></button><button type="button" aria-label="Bulleted list" title="Bulleted list" onClick={() => formatNotes('bullet')}>&#8226;</button><button type="button" aria-label="Numbered list" title="Numbered list" onClick={() => formatNotes('numbered')}>1.</button><button type="button" aria-label="Insert link" title="Insert link" onClick={() => formatNotes('link')}><Icon name="link" /></button></div>
               {enabledFields.has('Trade notes') && <textarea ref={notesInput} name="notes" placeholder="Share your thoughts on this trade..." value={notes} onChange={(event) => setNotes(event.target.value)} />}
-              {screenshotOptions.length > 0 && <label className="trade-control screenshot-existing-picker"><span>ATTACH SAVED SCREENSHOT</span><select aria-label="Attach saved screenshot" value={attachedScreenshotIds[0] ?? ''} onChange={(event) => setAttachedScreenshotIds(event.target.value ? [event.target.value] : [])}><option value="">No screenshot</option>{screenshotOptions.map((screenshot) => <option key={screenshot.id} value={screenshot.id}>{screenshot.name}</option>)}</select></label>}
-              {attachedScreenshots.length > 0 && <div className="trade-screenshot-previews">{attachedScreenshots.map((screenshot) => <figure key={screenshot.id}><img src={screenshot.src} alt={screenshot.name} /><figcaption>{screenshot.name}</figcaption><button type="button" aria-label={`Detach ${screenshot.name}`} onClick={() => setAttachedScreenshotIds([])}>×</button></figure>)}</div>}
+              {screenshotOptions.length > 0 && <label className="trade-control screenshot-existing-picker"><span>ATTACH SAVED SCREENSHOT</span><select aria-label="Attach saved screenshot" value={attachedScreenshotIds[0] ?? ''} onChange={(event) => { setAttachedScreenshotIds(event.target.value ? [event.target.value] : []); setScreenshotSelectionChanged(true) }}><option value="">No screenshot</option>{screenshotOptions.map((screenshot) => <option key={screenshot.id} value={screenshot.id}>{screenshot.name}</option>)}</select></label>}
+              {attachedScreenshots.length > 0 && <div className="trade-screenshot-previews">{attachedScreenshots.map((screenshot) => <figure key={screenshot.id}><img src={screenshot.src} alt={screenshot.name} /><figcaption>{screenshot.name}</figcaption><button type="button" aria-label={`Detach ${screenshot.name}`} onClick={() => { setAttachedScreenshotIds([]); setScreenshotSelectionChanged(true) }}>×</button></figure>)}</div>}
               <input ref={screenshotInput} className="screenshot-upload-input" type="file" accept="image/*" onChange={(event) => { addScreenshots(event.target.files); event.currentTarget.value = '' }} />
               <button type="button" className="add-chart-button" onClick={() => screenshotInput.current?.click()} disabled={attachedScreenshotIds.length >= 1}><Icon name="plus" /> SCREENSHOT <span>{attachedScreenshots.length} / 1</span></button>
               {screenshotUploadError && <span role="alert">{screenshotUploadError}</span>}
