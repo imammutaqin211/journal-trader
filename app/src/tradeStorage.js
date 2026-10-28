@@ -8,10 +8,17 @@ const CUSTOM_SYMBOLS_KEY = 'traders-journal:custom-symbols'
 const NO_TRADE_REASONS_KEY = 'traders-journal:no-trade-reasons'
 const memoryStore = {}
 
-function getStorage() {
+function getPersistentStorage() {
   try {
     if (typeof window !== 'undefined' && window.localStorage) return window.localStorage
   } catch {}
+
+  return null
+}
+
+function getStorage() {
+  const storage = getPersistentStorage()
+  if (storage) return storage
 
   return {
     getItem(key) {
@@ -103,21 +110,28 @@ export function saveStoredTrades(trades) {
   }
 }
 
-export function getStoredScreenshots() {
-  const storage = getStorage()
-
+export function loadStoredScreenshots() {
+  const storage = getPersistentStorage()
+  if (!storage) return { screenshots: [], readable: false }
   try {
     const raw = storage.getItem(SCREENSHOT_KEY)
-    if (!raw) return []
+    if (raw === null) return { screenshots: [], readable: true }
     const parsed = JSON.parse(raw)
-    return Array.isArray(parsed) ? parsed : []
+    return Array.isArray(parsed)
+      ? { screenshots: parsed, readable: true }
+      : { screenshots: [], readable: false }
   } catch {
-    return []
+    return { screenshots: [], readable: false }
   }
 }
 
+export function getStoredScreenshots() {
+  return loadStoredScreenshots().screenshots
+}
+
 export function saveStoredScreenshots(screenshots) {
-  const storage = getStorage()
+  const storage = getPersistentStorage()
+  if (!storage) return false
 
   try {
     storage.setItem(SCREENSHOT_KEY, JSON.stringify(screenshots))

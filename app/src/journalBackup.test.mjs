@@ -25,6 +25,16 @@ test('backup round-trip preserves all journal storage and clears keys absent in 
   assert.equal(target.getItem('traders-journal:no-trade-reasons'), null)
 })
 
+test('backup round-trip preserves screenshot Base64 data', () => {
+  const image = { id: 'image-1', name: 'chart.png', src: 'data:image/png;base64,aGVsbG8=' }
+  const source = createStorage({ 'traders-journal:screenshots': JSON.stringify([image]) })
+  const target = createStorage()
+
+  restoreJournalBackup(createJournalBackup(source), target)
+
+  assert.deepEqual(JSON.parse(target.getItem('traders-journal:screenshots')), [image])
+})
+
 test('invalid backups are rejected without changing existing data', () => {
   const target = createStorage({ 'traders-journal:trades': '[{"id":"keep"}]' })
 

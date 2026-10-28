@@ -1,6 +1,54 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { getStoredCustomSymbols, getStoredEnabledFields, getStoredNoTradeReasons, getStoredSymbolFavorites, getStoredTrades, saveStoredCustomSymbols, saveStoredEnabledFields, saveStoredNoTradeReasons, saveStoredSymbolFavorites, saveStoredTrades } from './tradeStorage.js'
+import { getStoredCustomSymbols, getStoredEnabledFields, getStoredNoTradeReasons, getStoredScreenshots, getStoredSymbolFavorites, getStoredTrades, loadStoredScreenshots, saveStoredCustomSymbols, saveStoredEnabledFields, saveStoredNoTradeReasons, saveStoredScreenshots, saveStoredSymbolFavorites, saveStoredTrades } from './tradeStorage.js'
+
+function withLocalStorage(storage, callback) {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, 'window')
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: { localStorage: storage } })
+  try {
+    callback()
+  } finally {
+    if (previous) Object.defineProperty(globalThis, 'window', previous)
+    else delete globalThis.window
+  }
+}
+
+function createStorage(initial = {}) {
+  const values = new Map(Object.entries(initial))
+  return {
+    getItem: (key) => values.get(key) ?? null,
+    setItem: (key, value) => values.set(key, String(value)),
+  }
+}
+
+test('screenshots load from the persistent key and preserve Base64 data URLs', () => {
+  const image = { id: 'image-1', name: 'chart.png', src: 'data:image/png;base64,aGVsbG8=' }
+  const storage = createStorage({ 'traders-journal:screenshots': JSON.stringify([image]) })
+
+  withLocalStorage(storage, () => {
+    assert.deepEqual(loadStoredScreenshots(), { screenshots: [image], readable: true })
+    assert.deepEqual(getStoredScreenshots(), [image])
+  })
+})
+
+test('screenshot storage failures are reported without changing previously saved images', () => {
+  const oldImage = { id: 'old-image', name: 'old.png', src: 'data:image/png;base64,b2xk' }
+  const storage = createStorage({ 'traders-journal:screenshots': JSON.stringify([oldImage]) })
+  storage.setItem = () => { throw new Error('QuotaExceededError') }
+
+  withLocalStorage(storage, () => {
+    assert.equal(saveStoredScreenshots([{ id: 'new-image', name: 'new.png', src: 'data:image/png;base64,bmV3' }]), false)
+    assert.equal(storage.getItem('traders-journal:screenshots'), JSON.stringify([oldImage]))
+  })
+})
+
+test('unreadable screenshot data is distinguished from an empty collection', () => {
+  const storage = createStorage({ 'traders-journal:screenshots': '{invalid' })
+
+  withLocalStorage(storage, () => {
+    assert.deepEqual(loadStoredScreenshots(), { screenshots: [], readable: false })
+  })
+})
 
 test('saveStoredTrades and getStoredTrades round-trip trade records', () => {
   const trades = [

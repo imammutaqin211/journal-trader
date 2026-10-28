@@ -3,6 +3,7 @@ import type { SymbolRecord } from './symbolCatalog.js'
 
 export function getStoredTrades(): TradeRecord[]
 export function saveStoredTrades(trades: TradeRecord[]): boolean
+export function loadStoredScreenshots(): { screenshots: any[]; readable: boolean }
 export function getStoredScreenshots(): any[]
 export function saveStoredScreenshots(screenshots: any[]): boolean
 export function getStoredEnabledFields(): string[] | null

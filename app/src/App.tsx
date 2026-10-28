@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import './App.css'
 import './reference.css'
-import { getStoredCustomSymbols, getStoredEnabledFields, getStoredNoTradeReasons, getStoredScreenshots, getStoredSymbolFavorites, getStoredTrades, saveStoredCustomSymbols, saveStoredEnabledFields, saveStoredNoTradeReasons, saveStoredScreenshots, saveStoredSymbolFavorites, saveStoredTrades } from './tradeStorage.js'
+import { getStoredCustomSymbols, getStoredEnabledFields, getStoredNoTradeReasons, getStoredSymbolFavorites, getStoredTrades, loadStoredScreenshots, saveStoredCustomSymbols, saveStoredEnabledFields, saveStoredNoTradeReasons, saveStoredScreenshots, saveStoredSymbolFavorites, saveStoredTrades } from './tradeStorage.js'
 import { createJournalBackup, restoreJournalBackup } from './journalBackup.js'
 import { DEFAULT_TRADING_ACCOUNT, combineAccountEquityCurves, getAccountEquity, getAccountEquityCurve, getStoredAppSettings, saveStoredAppSettings, type AppSettings, type CashMovement, type TradingAccountSettings } from './appSettings.js'
 import { createTradeId, getEquityCurve, getPerformanceBy, getRealizedTrades, getTradeDate, getTradeMultiplier, getTradeNetPnl, getTradeRiskReward, getTradeStats, getTradeTime, groupRealizedPnl, type TradeRecord } from './tradeMetrics.js'
@@ -12,6 +12,7 @@ import SymbolSelector from './SymbolSelector'
 type View = 'dashboard' | 'calendar' | 'trade-logging' | 'daily-journal' | 'analytics' | 'settings'
 type AnalyticsTab = 'performance' | 'edge' | 'behavior' | 'progress'
 type TradeScreenshot = { id: string; name: string; src: string }
+type ScreenshotStorageState = { screenshots: TradeScreenshot[]; readable: boolean; error: string }
 const DEFAULT_ENABLED_FIELDS = ['Exit date & time', 'Stop loss', 'Take profit', 'Risk / reward', 'Strategy', 'Trade notes']
 const STANDARD_TRADE_FIELDS = ['Exit date & time', 'Stop loss', 'Take profit', 'Risk / reward', 'Strategy', 'Execution fees', 'Market context', 'Trade notes', 'Trade tags', 'Emotional audit']
 const LIBRARY_TRADE_FIELDS = ['Commission', 'Confidence After Trade', 'Confidence Before Trade', 'Confluence Count', 'Entry Quality', 'Entry Trigger', 'Exit Quality', 'Exit Reason', 'Followed Plan', 'Lesson Learned', 'Liquidity', 'MAE', 'MFE', 'Market Regime', 'Mistake Type', 'News Event', 'Planned R-Multiple', 'Position Size', 'R-Multiple', 'Risk Amount', 'Risk Percent', 'Rule Violated', 'Screenshot Notes', 'Session', 'Setup Grade', 'Slippage', 'Swap', 'Time in Trade', 'Timeframe', 'Volatility']
@@ -561,7 +562,7 @@ function DashboardView({ onNavigate, onAddTradeForDate, onEditNoTradeReason, noT
   )
 }
 
-function TradeLoggingView({ screenshots, existingScreenshots, setScreenshots, onTradeSaved, editingTrade, onEditingComplete, onTradeLogged, initialTradeDate, enabledFields, setEnabledFields, account, accounts, customSymbols, symbolFavorites, onAddCustomSymbol, onToggleSymbolFavorite, onRemoveCustomSymbol }: { screenshots: TradeScreenshot[]; existingScreenshots: TradeScreenshot[]; setScreenshots: React.Dispatch<React.SetStateAction<TradeScreenshot[]>>; onTradeSaved: React.Dispatch<React.SetStateAction<TradeRecord[]>>; editingTrade: TradeRecord | null; onEditingComplete: () => void; onTradeLogged: () => void; initialTradeDate: string | null; enabledFields: Set<string>; setEnabledFields: React.Dispatch<React.SetStateAction<Set<string>>>; account: string; accounts: string[]; customSymbols: SymbolRecord[]; symbolFavorites: Set<string>; onAddCustomSymbol: (symbol: SymbolRecord) => string | null; onToggleSymbolFavorite: (identity: string) => void; onRemoveCustomSymbol: (identity: string) => void }) {
+function TradeLoggingView({ screenshots, existingScreenshots, setScreenshots, screenshotStorageError, onTradeSaved, editingTrade, onEditingComplete, onTradeLogged, initialTradeDate, enabledFields, setEnabledFields, account, accounts, customSymbols, symbolFavorites, onAddCustomSymbol, onToggleSymbolFavorite, onRemoveCustomSymbol }: { screenshots: TradeScreenshot[]; existingScreenshots: TradeScreenshot[]; setScreenshots: React.Dispatch<React.SetStateAction<TradeScreenshot[]>>; screenshotStorageError: string; onTradeSaved: React.Dispatch<React.SetStateAction<TradeRecord[]>>; editingTrade: TradeRecord | null; onEditingComplete: () => void; onTradeLogged: () => void; initialTradeDate: string | null; enabledFields: Set<string>; setEnabledFields: React.Dispatch<React.SetStateAction<Set<string>>>; account: string; accounts: string[]; customSymbols: SymbolRecord[]; symbolFavorites: Set<string>; onAddCustomSymbol: (symbol: SymbolRecord) => string | null; onToggleSymbolFavorite: (identity: string) => void; onRemoveCustomSymbol: (identity: string) => void }) {
   const [mode, setMode] = useState('Manual')
   const [side, setSide] = useState<'Long' | 'Short'>(editingTrade?.side ?? 'Long')
   const [instrument, setInstrument] = useState(editingTrade?.instrument ?? 'Equity')
@@ -588,6 +589,8 @@ function TradeLoggingView({ screenshots, existingScreenshots, setScreenshots, on
   const [dateTimeResetKey, setDateTimeResetKey] = useState(0)
   const [saved, setSaved] = useState(false)
   const [formError, setFormError] = useState('')
+  const [screenshotUploadError, setScreenshotUploadError] = useState('')
+  const [screenshotUploadPending, setScreenshotUploadPending] = useState(false)
   const [notes, setNotes] = useState(editingTrade?.notes ?? '')
   const [customFieldValues, setCustomFieldValues] = useState<Record<string, string | number | boolean>>(editingTrade?.customFields ?? {})
   const notesInput = useRef<HTMLTextAreaElement>(null)
@@ -647,15 +650,35 @@ function TradeLoggingView({ screenshots, existingScreenshots, setScreenshots, on
   const addScreenshots = (files: FileList | null) => {
     if (!files) return
     const uploads = Array.from(files).filter((file) => file.type.startsWith('image/')).slice(0, Math.max(0, 1 - attachedScreenshotIds.length))
+    if (!uploads.length) return
     const uploadIds = uploads.map(() => `screenshot-${globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`}`)
     setAttachedScreenshotIds((previous) => [...previous, ...uploadIds])
+    setScreenshotUploadPending(true)
+    setScreenshotUploadError('')
     uploads.forEach((file, index) => {
       const reader = new FileReader()
       reader.onload = () => {
-        if (typeof reader.result !== 'string') return
+        if (typeof reader.result !== 'string') {
+          setAttachedScreenshotIds((previous) => previous.filter((id) => id !== uploadIds[index]))
+          setScreenshotUploadError(`Could not read ${file.name}. Please try another image.`)
+          setScreenshotUploadPending(false)
+          return
+        }
         setScreenshots((previous) => [...previous, { id: uploadIds[index], name: file.name, src: reader.result as string }])
+        setScreenshotUploadPending(false)
       }
-      reader.readAsDataURL(file)
+      reader.onerror = () => {
+        setAttachedScreenshotIds((previous) => previous.filter((id) => id !== uploadIds[index]))
+        setScreenshotUploadError(`Could not read ${file.name}. Please try another image.`)
+        setScreenshotUploadPending(false)
+      }
+      try {
+        reader.readAsDataURL(file)
+      } catch {
+        setAttachedScreenshotIds((previous) => previous.filter((id) => id !== uploadIds[index]))
+        setScreenshotUploadError(`Could not read ${file.name}. Please try another image.`)
+        setScreenshotUploadPending(false)
+      }
     })
   }
 
@@ -686,6 +709,16 @@ function TradeLoggingView({ screenshots, existingScreenshots, setScreenshots, on
           event.preventDefault()
           if (saveLock.current) return
           saveLock.current = true
+          if (screenshotUploadPending) {
+            setFormError('Wait for the screenshot upload to finish before saving this trade.')
+            saveLock.current = false
+            return
+          }
+          if (screenshotStorageError && attachedScreenshotIds.length > 0) {
+            setFormError(screenshotStorageError)
+            saveLock.current = false
+            return
+          }
 
           const formData = new FormData(event.currentTarget)
           const symbolValue = String(formData.get('symbol') ?? '').trim()
@@ -836,6 +869,8 @@ function TradeLoggingView({ screenshots, existingScreenshots, setScreenshots, on
               {attachedScreenshots.length > 0 && <div className="trade-screenshot-previews">{attachedScreenshots.map((screenshot) => <figure key={screenshot.id}><img src={screenshot.src} alt={screenshot.name} /><figcaption>{screenshot.name}</figcaption><button type="button" aria-label={`Detach ${screenshot.name}`} onClick={() => setAttachedScreenshotIds([])}>×</button></figure>)}</div>}
               <input ref={screenshotInput} className="screenshot-upload-input" type="file" accept="image/*" onChange={(event) => { addScreenshots(event.target.files); event.currentTarget.value = '' }} />
               <button type="button" className="add-chart-button" onClick={() => screenshotInput.current?.click()} disabled={attachedScreenshotIds.length >= 1}><Icon name="plus" /> SCREENSHOT <span>{attachedScreenshots.length} / 1</span></button>
+              {screenshotUploadError && <span role="alert">{screenshotUploadError}</span>}
+              {screenshotStorageError && <span role="alert">{screenshotStorageError}</span>}
             </div>
             <div className="trade-save-row"><button type="submit" className="save-trade-button"><Icon name="check" /> Save trade</button>{saved && <span role="status">Trade saved</span>}{formError && <span role="alert">{formError}</span>}</div>
           </section>
@@ -1406,7 +1441,25 @@ function App() {
   const [darkTheme, setDarkTheme] = useState(true)
   const [editingTradeId, setEditingTradeId] = useState<string | null>(null)
   const [savedTrades, setSavedTrades] = useState<TradeRecord[]>(() => getStoredTrades())
-  const [tradeScreenshots, setTradeScreenshots] = useState<TradeScreenshot[]>(() => getStoredScreenshots())
+  const [screenshotState, setScreenshotState] = useState<ScreenshotStorageState>(() => {
+    const stored = loadStoredScreenshots()
+    return {
+      ...stored,
+      error: stored.readable ? '' : 'Saved screenshots could not be read and were not overwritten. Check browser storage or restore a valid backup.',
+    }
+  })
+  const screenshotStateRef = useRef(screenshotState)
+  const tradeScreenshots = screenshotState.screenshots
+  const setTradeScreenshots: React.Dispatch<React.SetStateAction<TradeScreenshot[]>> = (update) => {
+    const previous = screenshotStateRef.current
+    if (!previous.readable) return
+    const screenshots = typeof update === 'function' ? update(previous.screenshots) : update
+    const saved = saveStoredScreenshots(screenshots)
+    const error = saved ? '' : 'Screenshot could not be saved to browser storage. Existing saved screenshots were left unchanged.'
+    const next = { ...previous, screenshots, error }
+    screenshotStateRef.current = next
+    setScreenshotState(next)
+  }
   const [noTradeReasons, setNoTradeReasons] = useState<Record<string, string>>(() => getStoredNoTradeReasons())
   const [noTradeDialogDate, setNoTradeDialogDate] = useState<string | null>(null)
   const [pendingTradeDate, setPendingTradeDate] = useState<string | null>(null)
@@ -1425,10 +1478,6 @@ function App() {
   useEffect(() => {
     saveStoredAppSettings(appSettings)
   }, [appSettings])
-
-  useEffect(() => {
-    saveStoredScreenshots(tradeScreenshots)
-  }, [tradeScreenshots])
 
   useEffect(() => {
     saveStoredNoTradeReasons(noTradeReasons)
@@ -1626,7 +1675,7 @@ function App() {
 
           {activeView === 'calendar' && <CalendarView onNavigate={changeView} onAddTradeForDate={addTradeForDate} onEditNoTradeReason={setNoTradeDialogDate} noTradeReasons={noTradeReasons} trades={savedTrades} settings={appSettings} />}
 
-          {activeView === 'trade-logging' && <TradeLoggingView screenshots={tradeScreenshots} existingScreenshots={existingScreenshots} setScreenshots={setTradeScreenshots} onTradeSaved={setSavedTrades} editingTrade={tradeBeingEdited} onEditingComplete={() => setEditingTradeId(null)} onTradeLogged={() => setPendingTradeDate(null)} initialTradeDate={pendingTradeDate} enabledFields={enabledTradeFields} setEnabledFields={setEnabledTradeFields} account={selectedAccount} accounts={accountOptions} customSymbols={customSymbols} symbolFavorites={symbolFavorites} onAddCustomSymbol={addCustomSymbol} onToggleSymbolFavorite={toggleSymbolFavorite} onRemoveCustomSymbol={removeCustomSymbol} />}
+          {activeView === 'trade-logging' && <TradeLoggingView screenshots={tradeScreenshots} existingScreenshots={existingScreenshots} setScreenshots={setTradeScreenshots} screenshotStorageError={screenshotState.error} onTradeSaved={setSavedTrades} editingTrade={tradeBeingEdited} onEditingComplete={() => setEditingTradeId(null)} onTradeLogged={() => setPendingTradeDate(null)} initialTradeDate={pendingTradeDate} enabledFields={enabledTradeFields} setEnabledFields={setEnabledTradeFields} account={selectedAccount} accounts={accountOptions} customSymbols={customSymbols} symbolFavorites={symbolFavorites} onAddCustomSymbol={addCustomSymbol} onToggleSymbolFavorite={toggleSymbolFavorite} onRemoveCustomSymbol={removeCustomSymbol} />}
 
           {activeView === 'daily-journal' && <DailyJournalView onNavigate={changeView} screenshots={tradeScreenshots} trades={savedTrades} settings={appSettings} enabledFields={enabledTradeFields} onSelectForEdit={openTradeForEdit} onUpdateTrade={(updatedTrade) => setSavedTrades((previous) => previous.map((trade) => trade.id === updatedTrade.id ? updatedTrade : trade))} onDeleteTrade={(tradeId) => {
             const deletedScreenshotIds = new Set(savedTrades.find((trade) => trade.id === tradeId)?.screenshotIds ?? [])
